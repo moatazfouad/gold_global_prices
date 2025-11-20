@@ -7,31 +7,30 @@ import uvicorn
 
 app = FastAPI()
 
+
 class GoldRequest(BaseModel):
     symbol: str = "GC=F"
     start_date: str  # format "YYYY-MM-DD"
     end_date: str    # format "YYYY-MM-DD"
 
-class GoldResponse(BaseModel):
-    symbol: str
-    name: str
-    price: float
-    changePercentage: float
-    change: float
-    volume: int
-    dayLow: float
-    dayHigh: float
-    yearHigh: float
-    yearLow: float
-    marketCap: float | None
-    priceAvg50: float
-    priceAvg200: float
-    exchange: str
-    open: float
-    previousClose: float
-    timestamp: int
 
-@app.post("/gold-price", response_model=list[GoldResponse])
+class HistoricalOuncePriceResponse(BaseModel):
+    date: str
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    adjClose: float | None
+    volume: int | None
+    unadjustedVolume: int | None
+    change: float | None
+    changePercent: float | None
+    vwap: float | None
+    label: str | None
+    changeOverTime: float | None
+
+
+@app.post("/gold-price", response_model=list[HistoricalOuncePriceResponse])
 async def get_gold_price_range(request: GoldRequest):
     try:
         # Validate date format
@@ -40,10 +39,9 @@ async def get_gold_price_range(request: GoldRequest):
             end_dt = datetime.strptime(request.end_date, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="Dates must be in YYYY-MM-DD format")
-        
+
         ticker = yf.Ticker(request.symbol)
         data = ticker.history(start=request.start_date, end=request.end_date)
-        info = ticker.info
 
         if data.empty:
             raise HTTPException(status_code=404, detail="No data available for this date range")
@@ -54,37 +52,37 @@ async def get_gold_price_range(request: GoldRequest):
         for idx, row in data.iterrows():
             close_price = float(row['Close'])
             open_price = float(row['Open'])
-            low = float(row['Low'])
-            high = float(row['High'])
+            low_price = float(row['Low'])
+            high_price = float(row['High'])
             volume = int(row['Volume']) if 'Volume' in row else 0
 
+            # Change vs previous close
             if previous_close is None:
                 change = 0
-                change_percentage = 0
+                change_percent = 0
             else:
                 change = close_price - previous_close
-                change_percentage = (change / previous_close) * 100 if previous_close != 0 else 0
+                change_percent = (change / previous_close) * 100 if previous_close != 0 else 0
 
             previous_close = close_price
 
-            response = GoldResponse(
-                symbol=request.symbol,
-                name=info.get('shortName', 'Gold'),
-                price=close_price,
-                changePercentage=round(change_percentage, 2),
-                change=round(change, 2),
-                volume=volume,
-                dayLow=low,
-                dayHigh=high,
-                yearHigh=float(info.get('fiftyTwoWeekHigh', 0)),
-                yearLow=float(info.get('fiftyTwoWeekLow', 0)),
-                marketCap=float(info.get('marketCap')) if info.get('marketCap') else None,
-                priceAvg50=float(info.get('fiftyDayAverage', 0)),
-                priceAvg200=float(info.get('twoHundredDayAverage', 0)),
-                exchange=info.get('exchange', 'COMEX'),
+            # VWAP: (high + low + close) / 3
+            vwap = (high_price + low_price + close_price) / 3
+
+            response = HistoricalOuncePriceResponse(
+                date=idx.isoformat(),
                 open=open_price,
-                previousClose=previous_close,
-                timestamp=int(idx.timestamp())
+                high=high_price,
+                low=low_price,
+                close=close_price,
+                adjClose=close_price,  # For simplicity, same as close
+                volume=volume,
+                unadjustedVolume=volume,
+                change=round(change, 2),
+                changePercent=round(change_percent, 2),
+                vwap=round(vwap, 2),
+                label=idx.strftime("%b %d, %Y"),
+                changeOverTime=round(change / close_price if close_price != 0 else 0, 4)
             )
 
             responses.append(response)
@@ -93,6 +91,7 @@ async def get_gold_price_range(request: GoldRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # --- RUN SERVER ---
 if __name__ == "__main__":
