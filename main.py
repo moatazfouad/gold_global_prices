@@ -1,10 +1,9 @@
-# filename: main.py
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import yfinance as yf
-import time
 from datetime import datetime
+import os
+import uvicorn
 
 app = FastAPI()
 
@@ -59,7 +58,6 @@ async def get_gold_price_range(request: GoldRequest):
             high = float(row['High'])
             volume = int(row['Volume']) if 'Volume' in row else 0
 
-            # calculate change vs previous close
             if previous_close is None:
                 change = 0
                 change_percentage = 0
@@ -95,3 +93,8 @@ async def get_gold_price_range(request: GoldRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- RUN SERVER ---
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
